@@ -2,6 +2,8 @@ import os
 import csv
 import sys
 import logging
+import math
+import sqlite3
 import numpy as np
 from metadata import Metadata
 
@@ -144,7 +146,7 @@ class StreamCatFileReader():
                     for var in vars:
                         val = None
                         val = data_row[var]
-                        row_comid.append(val[0])                                                
+                        row_comid.append(val[0])
 
                     out_data_region.append(row_comid)
                     
@@ -159,9 +161,90 @@ class StreamCatFileReader():
             #out_data_file_type.append(out_data_region)
                 #End of comid loop
                         
+    
+    def add_to_db(self, data_table):
+        qry = "insert into stream_cat (comid, wsareasqkm, elevws, popden2010ws, mast_2008, mast_2009, prg_bmmi, iwi_v2_1) values ({}, {}, {}, {}, {}, {}, {}, {})"
+        conn = sqlite3.connect(os.path.join("output", "pisces_stream_cat.db"))
+        with conn:
+            cursor = conn.cursor()
+            for row in data_table:
+                qry_ins = qry.format(*row)
+                cursor.execute(qry_ins)
+
+            conn.commit()
+            cursor.close()   
+
+    #This function
+    def get_all_comids_data(self):
+        regions = list()
+        for reg in range(1,19):
+            regions.append(str(reg).zfill(2))
+
+        file_types = self.metadata.get_file_types()
+        file_format = self.metadata.get_file_format()
+        variables = self.metadata.get_variables()
+
+        dct_var_idx = {"comid": 0, "wsareasqkm":1, "elevws":2,"popden2010ws":3, "mast_2008":4,"mast_2009":5,"prg_bmmi":6, "iwi_v2_1":7}
+    
+        for reg in regions:
+
+            print("Region: " + reg)
+            #This list will hold list of rows for a region
+            data_table = list()
+
+            #flag to indicate new rows are added not appended
+            b_add_flag = True
+
+            for file_type in file_types:
+                print("Filetype: " + file_type)
+
+                vars = variables[file_type]
+                file_name = file_format.format(file_type, reg, "csv")
+                file_path = os.path.join(file_type, file_name)
+
+                #Load the csv data file
+                data_arr = np.genfromtxt(file_path, delimiter=',', names=True, dtype=None, encoding=None)
+                size = len(data_arr)
+                print("Num records: " + str(size))
+                for idx in range(0,size):
+
+                    data_row = data_arr[idx]
+                    comid = data_row["COMID"]
+                    new_row = list()
+                    if b_add_flag:
+                        new_row.append(comid)
+
+                    for var in vars:
+                        val = None
+                        #Handle NA values in file
+                        try:
+                            val = float(data_row[var])
+                            if math.isnan(val):
+                                val = -9999
+                        except ValueError:
+                            val = -9999
+                        #Append to row in data_table if it is there
+                        if b_add_flag:
+                            new_row.append(val)
+                        else:
+                            var_idx = dct_var_idx[var.lower()]
+                            lst_row = data_table[idx]
+                            lst_row.append(val)
+                                                
+                    if b_add_flag:
+                        data_table.append(new_row)
+                
+                b_add_flag = False
+
+            self.add_to_db(data_table)
+
+
+
+
 
 
 if __name__ == '__main__':
     sc_reader = StreamCatFileReader()
-    sc_reader.get_data()
+    #sc_reader.get_data()
+    sc_reader.get_all_comids_data()
     
